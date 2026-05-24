@@ -1,0 +1,41 @@
+# Gradle
+.gradle/
+build/
+!gradle-wrapper.jar
+out/
+
+# IntelliJ
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Eclipse
+.classpath
+.project
+.settings/
+bin/
+
+# VS Code
+.vscode/
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Run directories (NeoForge dev environment)
+run/
+runs/
+runs_client/
+runs_server/
+
+# Generated resources
+src/generated/
+
+# Local build artifacts that may have been packaged with the source ZIP
+javac.*.args
