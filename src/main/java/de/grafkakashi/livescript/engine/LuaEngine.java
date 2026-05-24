@@ -91,8 +91,15 @@ public class LuaEngine implements ScriptEngine {
     }
 
     private void installTimeoutHook(Globals globals, long deadline) {
-        // debug.sethook(function(event) ... end, "", 1000)
-        // We register a Java-side hook function that throws on deadline overshoot.
+        // debug.sethook(hook, mask [, count])
+        // Signature: first arg is the hook function (no thread), second arg is
+        // the mask string, third optional arg is instruction count.
+        //
+        // We were previously passing 'globals' as the first arg — that's a
+        // LuaTable, not a thread or function, so LuaJ errored with
+        // "function expected, got table" BEFORE any user code ran. The user
+        // saw a confusing "Line 59" reference even though step 1 of the
+        // script never executed.
         LuaValue debug = globals.get("debug");
         if (debug.isnil()) return; // standardGlobals lacks debug; debugGlobals has it
 
@@ -104,8 +111,11 @@ public class LuaEngine implements ScriptEngine {
                 return LuaValue.NIL;
             }
         };
+        // mask="" (no per-line/call/return events), count=10000 (fire every
+        // 10k bytecode instructions). That's frequent enough to enforce a
+        // few-second timeout without measurable overhead on normal scripts.
         debug.get("sethook").invoke(new LuaValue[]{
-                globals, hookFn, LuaValue.valueOf(""), LuaValue.valueOf(10_000)
+                hookFn, LuaValue.valueOf(""), LuaValue.valueOf(10_000)
         });
     }
 
