@@ -36,10 +36,22 @@ public class ScriptContext {
     public MinecraftServer server() { return server; }
     public boolean isActive() { return active; }
 
-    /** Called from script bindings — append a line to console output. */
+    /**
+     * Called from script bindings — append a line to console output.
+     *
+     * <p>Why both buffer and logger: the buffer is what the editor's
+     * console panel shows after an interactive Run. But scripts also
+     * print from inside event handlers (e.g. {@code on('player.chat',
+     * function(e) print(...) end)}) where there's no execute() round-trip
+     * to drain the buffer afterward — without also logging, that output
+     * would be invisible. The double-write costs almost nothing and makes
+     * "why isn't my print showing" stop being a mystery.
+     */
     public void print(Object obj) {
         String line = obj == null ? "null" : obj.toString();
         outputBuffer.add(line);
+        de.grafkakashi.livescript.LiveScriptMod.LOGGER.info("[script:{}] {}",
+                scriptId, line);
     }
 
     /** Drain the buffer; called after each execute() to capture output for the client. */
@@ -64,7 +76,15 @@ public class ScriptContext {
                 try {
                     handler.accept(e);
                 } catch (Throwable t) {
+                    // Both surfaces: the editor console (via print, drained
+                    // on next execute) AND the server log (immediate). The
+                    // logger line includes the stack trace so we can debug
+                    // "handler fired but did nothing visible" cases without
+                    // bouncing back through the user for more info.
                     print("[error] " + t.getMessage());
+                    de.grafkakashi.livescript.LiveScriptMod.LOGGER.warn(
+                            "[script:{}] handler for {} threw",
+                            scriptId, eventClass.getSimpleName(), t);
                 }
             }
         };

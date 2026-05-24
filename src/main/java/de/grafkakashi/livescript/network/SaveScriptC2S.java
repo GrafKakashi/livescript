@@ -52,8 +52,16 @@ public record SaveScriptC2S(String path, String content) implements CustomPacket
         }).whenComplete((unused, err) -> {
             if (err != null) {
                 LiveScriptMod.LOGGER.warn("save failed for {}", pkt.path, err);
+                // The exception chain looks like CompletionException -> RuntimeException
+                // -> IOException (from ScriptStorage.write). Walk to the deepest non-null
+                // message instead of blindly calling err.getCause().getMessage(), which
+                // NPEs if we somehow hit a top-level exception with no cause.
+                Throwable t = err;
+                while (t.getCause() != null) t = t.getCause();
+                String msg = t.getMessage();
+                if (msg == null) msg = t.getClass().getSimpleName();
                 PacketDistributor.sendToPlayer(sp, new ExecutionResultS2C(
-                        pkt.path, false, "save failed: " + err.getCause().getMessage(), 0));
+                        pkt.path, false, "save failed: " + msg, 0));
                 return;
             }
             // Save succeeded — notify client, then optionally auto-run on the server thread

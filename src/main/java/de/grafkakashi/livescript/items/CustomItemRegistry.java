@@ -22,8 +22,8 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Loads custom item definitions from {@code config/livescript/items.json} and
- * registers them with the {@code livescript} namespace at mod-construction time.
+ * Loads custom item definitions from {@code <gameDir>/data/livescript/items.json}
+ * and registers them with the {@code livescript} namespace at mod-construction time.
  *
  * The file is loaded ONCE during mod init — items are baked into the registry
  * before the world loads, so server-restart is required to add or modify items.
@@ -109,21 +109,24 @@ public final class CustomItemRegistry {
      * items.json (if any), creates a DeferredRegister, and schedules registration.
      * Safe to call even if no items.json exists — DeferredRegister still attaches
      * to the bus but with zero entries.
+     *
+     * @param rootDir the LiveScript root, i.e. {@code <gameDir>/data/livescript/}.
+     *                Looks for {@code items.json} and {@code textures/} inside.
      */
-    public static void bootstrap(IEventBus modBus, Path configDir) {
+    public static void bootstrap(IEventBus modBus, Path rootDir) {
         ITEMS = DeferredRegister.createItems(NAMESPACE);
 
         // Seed a README in textures/ so the user knows where to drop PNGs.
         // We do this unconditionally each launch — costs nothing and helps
         // users who delete the file by accident.
-        Path texturesReadme = configDir.resolve("textures").resolve("README.txt");
+        Path texturesReadme = rootDir.resolve("textures").resolve("README.txt");
         if (!Files.exists(texturesReadme)) {
             try {
                 Files.writeString(texturesReadme, DEFAULT_TEXTURES_README);
             } catch (IOException ignored) { /* harmless if it fails */ }
         }
 
-        Path itemsJson = configDir.resolve("items.json");
+        Path itemsJson = rootDir.resolve("items.json");
         if (!Files.exists(itemsJson)) {
             // Seed a commented example so the user sees the schema. Items are
             // marked _disabled_ by being inside an "_examples" key (which we
@@ -256,29 +259,52 @@ public final class CustomItemRegistry {
      * they're just keys with "_" prefix that we ignore. Real JSON doesn't allow
      * // comments.
      */
+    /**
+     * Default content written to items.json on first launch (when no file
+     * exists yet). Three active demo items pair with the recipes seeded by
+     * {@code ScriptStorage.seedExamples} as {@code items_demo.js}.
+     *
+     * <p>Why active items as defaults rather than commented-out examples:
+     * a new user who never touches items.json or items_demo.js still sees
+     * three custom items working end-to-end (declare → craft → use). That's
+     * the cheapest possible "tutorial" — no docs to read. If they're unwanted,
+     * deleting items.json (or just the entries inside) takes seconds.
+     *
+     * <p>The {@code _about} field is a no-op (keys starting with {@code _}
+     * are ignored by the loader). It exists as a hint for users opening the
+     * file for the first time.
+     */
     private static final String DEFAULT_ITEMS_JSON = """
             {
               "_about": [
-                "LiveScript custom items. Edit this file then restart the server.",
+                "LiveScript custom items. Edit then FULLY RESTART Minecraft",
+                "(quit to title is not enough — items are registered once",
+                "per Minecraft process, not once per world).",
+                "",
                 "Each entry under 'items' becomes a 'livescript:<key>' item.",
-                "Textures: drop a PNG named <key>.png in the textures/ folder."
+                "Drop a 16x16 PNG named <key>.png in the textures/ folder.",
+                "These three demos pair with scripts/examples/items_demo.js."
               ],
-              "_examples": {
+              "items": {
                 "magic_dust": {
                   "display_name": "Magic Dust",
                   "max_stack_size": 64,
                   "rarity": "rare"
                 },
                 "phoenix_feather": {
+                  "display_name": "Phoenix Feather",
                   "max_stack_size": 16,
                   "fire_resistant": true
                 },
                 "soul_bread": {
+                  "display_name": "Soul Bread",
                   "max_stack_size": 16,
-                  "food": { "nutrition": 6, "saturation": 0.8, "always_edible": true }
+                  "food": {
+                    "nutrition": 6,
+                    "saturation": 0.8,
+                    "always_edible": true
+                  }
                 }
-              },
-              "items": {
               }
             }
             """;

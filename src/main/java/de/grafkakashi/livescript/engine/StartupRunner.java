@@ -30,9 +30,29 @@ import java.util.regex.Pattern;
 public final class StartupRunner {
     private StartupRunner() {}
 
-    /** Match "@startup" plus an optional "priority=NN" arg, anywhere on the line. */
+    /**
+     * Matches an {@code @startup} directive at the top of a comment line.
+     *
+     * <p>Anchored to the start of the line (after optional whitespace and
+     * the comment marker) so prose like "without @startup you'd..." doesn't
+     * accidentally trigger detection. The comment marker accepted is one of
+     * {@code //} (JS) or {@code --} (Lua); the regex is permissive in
+     * exactly that respect.
+     *
+     * <p>Example matches:
+     * <pre>
+     *   // @startup
+     *   // @startup priority=10
+     *       -- @startup priority=-5
+     * </pre>
+     * Example non-matches:
+     * <pre>
+     *   print('@startup is a thing')   ← not a comment
+     *   // see @startup docs below      ← @startup not at start of comment
+     * </pre>
+     */
     private static final Pattern ANNOTATION =
-            Pattern.compile("@startup(?:\\s+priority\\s*=\\s*(-?\\d+))?");
+            Pattern.compile("^\\s*(?://|--)\\s*@startup(?:\\s+priority\\s*=\\s*(-?\\d+))?\\s*$");
 
     /** Cap scanning at this many lines per file to keep startup fast. */
     private static final int SCAN_LINE_LIMIT = 20;
@@ -63,11 +83,23 @@ public final class StartupRunner {
 
         List<StartupEntry> found = new ArrayList<>();
         for (String scriptId : ScriptStorage.list()) {
+            // list() now includes .json config files alongside .js/.lua, but
+            // only scripts can have @startup directives — JSON files are just
+            // data. Skip non-script entries quickly to avoid pointless reads.
             ScriptType type = ScriptType.fromExtension(scriptId);
             if (type == null) continue;
             String source = readOrNull(scriptId);
             if (source == null) continue;
             Integer prio = findStartupPriority(source);
+            // Debug log: see for every script whether @startup was detected
+            // and at what priority. Logged at INFO so it shows up by default;
+            // without it, "why isn't my @startup script running" is impossible
+            // to diagnose remotely.
+            if (prio == null) {
+                LiveScriptMod.LOGGER.info("[startup-scan] {} → no @startup directive", scriptId);
+            } else {
+                LiveScriptMod.LOGGER.info("[startup-scan] {} → @startup priority={}", scriptId, prio);
+            }
             if (prio != null) found.add(new StartupEntry(scriptId, type, prio));
         }
 

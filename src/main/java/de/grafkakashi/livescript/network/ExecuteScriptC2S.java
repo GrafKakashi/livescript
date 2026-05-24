@@ -31,8 +31,14 @@ public record ExecuteScriptC2S(String path, String content) implements CustomPac
 
         ScriptType type = ScriptType.fromExtension(pkt.path);
         if (type == null) {
+            // .json files are valid in the editor (you can save them) but
+            // they aren't scripts, so Run is a no-op for them — be specific
+            // about it instead of saying "unknown extension".
+            String msg = pkt.path.toLowerCase(java.util.Locale.ROOT).endsWith(".json")
+                    ? "JSON files aren't executable — only .js and .lua scripts can be run"
+                    : "unknown extension — must be .js or .lua";
             PacketDistributor.sendToPlayer(sp, new ExecutionResultS2C(
-                    pkt.path, false, "unknown extension — must be .js or .lua", 0));
+                    pkt.path, false, msg, 0));
             return;
         }
         // Lint before run — same logic as save. Catches the obvious cases up front.

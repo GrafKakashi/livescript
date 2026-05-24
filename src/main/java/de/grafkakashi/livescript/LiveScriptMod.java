@@ -37,22 +37,20 @@ public class LiveScriptMod {
         // ready. Use as plain string for the update-check comparison.
         runningVersion = container.getModInfo().getVersion().toString();
 
-        // Custom items: read items.json at mod-construction time so the items
-        // are registered before the item registry freezes. Server-restart is
-        // required to add or modify items (Minecraft constraint, not ours).
-        java.nio.file.Path configDir = net.neoforged.fml.loading.FMLPaths.CONFIGDIR.get()
-                .resolve(MOD_ID);
-        java.nio.file.Path texturesDir = configDir.resolve("textures");
-        try {
-            java.nio.file.Files.createDirectories(texturesDir);  // also creates configDir
-        } catch (java.io.IOException ignored) {
-            /* directories may exist or be unwritable; nothing we can do here */
-        }
-        de.grafkakashi.livescript.items.CustomItemRegistry.bootstrap(modBus, configDir);
+        // User content layout (scripts + items + textures) lives under
+        // <gameDir>/data/livescript/, an instance-wide directory. The mod's
+        // own .toml config still goes in config/. See LiveScriptPaths javadoc.
+        LiveScriptPaths.ensureExist();
+        // One-shot migration from the pre-v0.13 layout where items/textures
+        // lived in config/livescript/ — non-destructive, only copies missing
+        // files. Safe to run on every boot.
+        LiveScriptPaths.migrateLegacyConfig();
+        de.grafkakashi.livescript.items.CustomItemRegistry.bootstrap(modBus, LiveScriptPaths.root());
 
         // Custom item resource pack: synthesises models, textures, lang for the
         // registered items at pack-load time. Texture PNGs come from
-        // config/livescript/textures/<id>.png; everything else is auto-generated.
+        // <gameDir>/data/livescript/textures/<id>.png; everything else is
+        // auto-generated.
         modBus.addListener(de.grafkakashi.livescript.items.CustomItemResourcePack::onAddPackFinders);
 
         // Mod bus events (setup)
@@ -75,9 +73,27 @@ public class LiveScriptMod {
 
     @SubscribeEvent
     public void onServerStarting(ServerStartingEvent event) {
-        // Initialize storage relative to the server/world directory
-        var serverDir = event.getServer().getServerDirectory();
-        ScriptStorage.init(serverDir.resolve("livescript"));
+        // Scripts live under <gameDir>/data/livescript/scripts/ — instance-wide,
+        // not per-world. This means all worlds in the same client install
+        // (and all worlds on the dedicated server) share the same scripts.
+        // The init call is idempotent: re-initialising on world re-open
+        // doesn't lose any state.
+        ScriptStorage.init(LiveScriptPaths.root());
+
+        // One-shot migration of legacy scripts:
+        //   - dedicated server: <server-root>/livescript/scripts/
+        //   - integrated server: <world>/livescript/scripts/
+        // The serverDirectory the event exposes resolves correctly for both
+        // (world dir in singleplayer, server root in dedicated). Non-destructive:
+        // only copies files that don't already exist at the new location, and
+        // never deletes from the old one.
+        try {
+            var legacyServerRoot = event.getServer().getServerDirectory().resolve("livescript");
+            LiveScriptPaths.migrateLegacyScripts(legacyServerRoot);
+        } catch (Throwable t) {
+            LOGGER.warn("legacy script migration failed (non-fatal)", t);
+        }
+
         ScriptManager.get().onServerStarting(event.getServer());
     }
 

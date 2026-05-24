@@ -25,7 +25,7 @@ import java.util.Set;
 /**
  * Synthesises a virtual resource pack at runtime that supplies the assets for
  * {@link CustomItemRegistry custom items}: per-item model JSONs, the user's
- * texture PNGs (read from {@code config/livescript/textures/<id>.png}), and a
+ * texture PNGs (read from {@code <gameDir>/data/livescript/textures/<id>.png}), and a
  * lang file mapping translation keys to display names.
  *
  * <p>Nothing is materialised on disk. Mojang's {@link PackResources} interface
@@ -54,8 +54,9 @@ public final class CustomItemResourcePack {
         // registered in code, not via JSON recipes.
         if (event.getPackType() != PackType.CLIENT_RESOURCES) return;
 
-        Path texturesDir = net.neoforged.fml.loading.FMLPaths.CONFIGDIR.get()
-                .resolve(LiveScriptMod.MOD_ID).resolve("textures");
+        // Textures live under <gameDir>/data/livescript/textures/. Same root
+        // as items.json, scripts/, etc. — instance-wide, easy to find.
+        Path texturesDir = de.grafkakashi.livescript.LiveScriptPaths.texturesDir();
 
         PackLocationInfo location = new PackLocationInfo(
                 PACK_ID,
@@ -141,7 +142,7 @@ public final class CustomItemResourcePack {
                 return () -> bytes(buildItemModel(id));
             }
 
-            // Texture: textures/item/<id>.png  →  config/livescript/textures/<id>.png
+            // Texture: textures/item/<id>.png  →  <gameDir>/data/livescript/textures/<id>.png
             if (path.startsWith("textures/item/") && path.endsWith(".png")) {
                 String id = path.substring("textures/item/".length(), path.length() - ".png".length());
                 Path pngFile = texturesDir.resolve(id + ".png");

@@ -10,6 +10,7 @@ import de.grafkakashi.livescript.network.DeleteFolderC2S;
 import de.grafkakashi.livescript.network.DeleteScriptC2S;
 import de.grafkakashi.livescript.network.ExecuteScriptC2S;
 import de.grafkakashi.livescript.network.LoadScriptC2S;
+import de.grafkakashi.livescript.network.OpenEditorC2S;
 import de.grafkakashi.livescript.network.RenameScriptC2S;
 import de.grafkakashi.livescript.network.SaveScriptC2S;
 import net.minecraft.client.gui.GuiGraphics;
@@ -49,6 +50,10 @@ public class ScriptEditorScreen extends Screen {
     // Tokenizers — cheap, instantiated once
     private final Tokenizer jsTok = new JsTokenizer();
     private final Tokenizer luaTok = new LuaTokenizer();
+    /** Tokenizer for .json files. Falls back to plain rendering if a file has
+     *  no script type AND isn't json — but right now those are the only three
+     *  editable extensions, so this covers everything. */
+    private final Tokenizer jsonTok = new de.grafkakashi.livescript.client.gui.highlight.JsonTokenizer();
     private final CompletionProvider completions = new CompletionProvider();
 
     // State
@@ -226,7 +231,18 @@ public class ScriptEditorScreen extends Screen {
         addRenderableWidget(Button.builder(Component.literal("Delete"),  b -> deleteActive()).bounds(172, btnY, 56, 18).build());
         addRenderableWidget(Button.builder(Component.literal("+ JS"),    b -> createNew(ScriptType.JS)).bounds(232, btnY, 36, 18).build());
         addRenderableWidget(Button.builder(Component.literal("+ Lua"),   b -> createNew(ScriptType.LUA)).bounds(272, btnY, 40, 18).build());
-        addRenderableWidget(Button.builder(Component.literal("+ Folder"),b -> createFolder()).bounds(316, btnY, 60, 18).build());
+        // + JSON makes a new empty config file. Use case: user wants a fresh
+        // config alongside items.json (e.g. a future entities.json) or just
+        // wants to test the editor's JSON support. Default template is
+        // valid empty JSON ("{}") so the save validator doesn't reject the
+        // first save attempt.
+        addRenderableWidget(Button.builder(Component.literal("+ JSON"),  b -> createNewJson()).bounds(316, btnY, 50, 18).build());
+        addRenderableWidget(Button.builder(Component.literal("+ Folder"),b -> createFolder()).bounds(370, btnY, 60, 18).build());
+        // Refresh re-reads the script directory from disk so files placed there
+        // by an external editor (VSCode, Notepad, file manager) show up without
+        // closing+reopening the editor. Uses the existing OpenEditorC2S which
+        // already triggers a syncFileTreeTo on the server.
+        addRenderableWidget(Button.builder(Component.literal("Refresh"), b -> requestRefresh()).bounds(434, btnY, 56, 18).build());
         addRenderableWidget(Button.builder(Component.literal("Close"),   b -> onClose()).bounds(width - 54, btnY, 50, 18).build());
 
         recomputeLayout();
@@ -263,8 +279,12 @@ public class ScriptEditorScreen extends Screen {
     }
 
     public void onContentReceived(String path, String content) {
+        // Scripts have a ScriptType; JSON files don't (null is intentional
+        // and means "editable but not executable"). Other extensions are
+        // refused — we shouldn't have asked for them in the first place.
         ScriptType type = ScriptType.fromExtension(path);
-        if (type == null) return;
+        boolean isJson = path.toLowerCase(java.util.Locale.ROOT).endsWith(".json");
+        if (type == null && !isJson) return;
         openTabs.put(path, new EditorState(path, type, content));
         activeTab = path;
     }
@@ -553,7 +573,15 @@ public class ScriptEditorScreen extends Screen {
         }
 
         g.fill(editorX, editorY, editorX + editorW, editorY + editorH, 0xFF1E1E1E);
-        Tokenizer tok = (st.type == ScriptType.JS) ? jsTok : luaTok;
+        // Type-driven tokenizer pick. JSON files have type == null (JSON isn't
+        // an executable script type) and get the dedicated JSON tokenizer.
+        // Anything else routes to JS/Lua. Future file kinds will fall through
+        // to luaTok by default — fine since they're plain-text rendered.
+        Tokenizer tok;
+        if (st.type == ScriptType.JS) tok = jsTok;
+        else if (st.type == ScriptType.LUA) tok = luaTok;
+        else if (st.path.toLowerCase(java.util.Locale.ROOT).endsWith(".json")) tok = jsonTok;
+        else tok = luaTok;
         st.ensureFoldsFresh();
 
         int visibleRows = editorH / LINE_H;
@@ -1406,6 +1434,16 @@ public class ScriptEditorScreen extends Screen {
      * place to push to a worker thread.
      */
     private void relintActive(EditorState st) {
+        // Scripts get the proper linter (Rhino parser / LuaJ compile).
+        // JSON files get no live linter — the JSON-parse validation runs
+        // server-side on save and the result comes back via the console.
+        // Showing inline squigglies while typing in JSON would mean wiring
+        // Gson into the editor render loop and we'd rather not.
+        if (st.type == null) {
+            st.lintIssues = java.util.List.of();
+            st.lintDirty = false;
+            return;
+        }
         try {
             st.lintIssues = de.grafkakashi.livescript.engine.Linter.lintDetailed(
                     st.type, st.path, st.fullContent());
@@ -1418,7 +1456,27 @@ public class ScriptEditorScreen extends Screen {
     private void runActive() {
         EditorState st = active();
         if (st == null) return;
+        // Skip the server round-trip for non-executable file kinds — show
+        // the verdict in the editor console immediately. The server would
+        // reject these anyway (see ExecuteScriptC2S.handle), but a local
+        // hint is friendlier than the network-delayed error.
+        if (st.type == null) {
+            st.appendConsole("§7Run does nothing for non-script files (.json etc.)");
+            return;
+        }
         PacketDistributor.sendToServer(new ExecuteScriptC2S(st.path, st.fullContent()));
+    }
+
+    /**
+     * Re-request the file tree from the server so external file additions
+     * (someone dropped a .js in the scripts folder via Explorer/VSCode) show
+     * up without closing+reopening the editor. The active tab's in-memory
+     * content is NOT replaced — if the user has unsaved edits to an open
+     * file, those stay safe even if the on-disk version has changed; they'll
+     * notice on next reload via clicking the tree entry.
+     */
+    private void requestRefresh() {
+        PacketDistributor.sendToServer(new OpenEditorC2S());
     }
 
     private void deleteActive() {
@@ -1511,8 +1569,13 @@ public class ScriptEditorScreen extends Screen {
                     EditorState moved = openTabs.remove(oldPath);
                     if (moved != null) {
                         moved.path = newName;
-                        ScriptType newType = ScriptType.fromExtension(newName);
-                        if (newType != null) moved.type = newType;
+                        // Cross-extension rename: foo.js → foo.lua changes the
+                        // ScriptType; foo.js → foo.json changes it to null
+                        // (JSON is editable but not a script). Always update
+                        // the field rather than only on non-null, so JS→JSON
+                        // doesn't leave a stale type that the renderer would
+                        // act on.
+                        moved.type = ScriptType.fromExtension(newName);
                         openTabs.put(newName, moved);
                         activeTab = newName;
                     }
@@ -1590,9 +1653,13 @@ public class ScriptEditorScreen extends Screen {
         for (char c : new char[]{':', '*', '?', '"', '<', '>', '|'}) {
             if (name.indexOf(c) >= 0) return "invalid character: " + c;
         }
-        if (!name.endsWith(".js") && !name.endsWith(".lua")) return "must end in .js or .lua";
-        // Reject "just an extension" like ".js"
-        String stem = name.substring(0, name.length() - (name.endsWith(".js") ? 3 : 4));
+        // .js / .lua are executable scripts; .json is editable config (e.g.
+        // items.json). All three are accepted in the file tree.
+        if (!ScriptType.isEditableExtension(name))
+            return "must end in .js, .lua, or .json";
+        // Reject "just an extension" like ".js" or ".json"
+        int dotIdx = name.lastIndexOf('.');
+        String stem = name.substring(0, dotIdx);
         if (stem.isEmpty() || stem.endsWith("/") || stem.endsWith("\\")) {
             return "filename cannot be just an extension";
         }
@@ -1623,6 +1690,38 @@ public class ScriptEditorScreen extends Screen {
                             ? "// new JS script\nprint('hello from " + name + "');\n"
                             : "-- new Lua script\nprint('hello from " + name + "')\n";
                     EditorState st = new EditorState(name, type, template);
+                    st.dirty = true;
+                    openTabs.put(name, st);
+                    activeTab = name;
+                    PacketDistributor.sendToServer(new SaveScriptC2S(name, template));
+                }
+        );
+    }
+
+    /**
+     * Create a new .json config file. Same flow as {@link #createNew(ScriptType)}
+     * but with type=null (JSON isn't a ScriptType) and a minimal valid-JSON
+     * template ("{}") so the server-side validator doesn't reject the first
+     * autosave. The user picks a name; if they want it directly under the
+     * livescript root (sibling of items.json) they just type "myconfig.json";
+     * if they want it in a subfolder, "subfolder/myconfig.json".
+     */
+    private void createNewJson() {
+        String base = "untitled";
+        int n = 1;
+        String suggestion;
+        do { suggestion = base + n + ".json"; n++; }
+        while (scriptList.contains(suggestion) || openTabs.containsKey(suggestion));
+
+        promptDialog = new PromptDialog(
+                "New JSON file",
+                "Filename — subdirectories with / are allowed (e.g. configs/foo.json)",
+                suggestion,
+                name -> validateScriptName(name, null),
+                name -> {
+                    // Empty object: trivially valid JSON; user fills it in
+                    String template = "{}\n";
+                    EditorState st = new EditorState(name, null, template);
                     st.dirty = true;
                     openTabs.put(name, st);
                     activeTab = name;

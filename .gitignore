@@ -39,3 +39,7 @@ src/generated/
 
 # Local build artifacts that may have been packaged with the source ZIP
 javac.*.args
+
+# Local convenience scripts (developer-specific, not part of the source)
+git-push.bat
+*.local.bat

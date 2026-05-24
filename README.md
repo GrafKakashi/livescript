@@ -301,11 +301,19 @@ LiveScript can register entirely new items with their own IDs, display names,
 and item properties. These work like vanilla items: craftable, stackable,
 usable as recipe ingredients/outputs, food, fire-resistant, etc.
 
-**Server restart is required** to add or modify custom items — the item
-registry is frozen after world load by Minecraft itself, not by us.
+**Restart caveat:** Minecraft's item registry freezes after mod load and stays
+frozen for the entire process. That means changes to `items.json` need a
+**full Minecraft restart** to take effect — quitting to the title screen and
+opening a new world is NOT enough, because the mod constructor (where items
+get registered) only runs once per JVM. Server admins running a dedicated
+server have it easier: a server restart is enough.
 
-Items live in `config/livescript/items.json`. On first run a sample with
-schema examples is auto-seeded. The minimal version:
+Items live in `data/livescript/items.json`. On first run, three demo items
+(`magic_dust`, `phoenix_feather`, `soul_bread`) are seeded along with a paired
+script `scripts/examples/items_demo.js` that registers crafting recipes for
+them. Delete or replace as you like.
+
+Minimal schema:
 
 ```json
 {
@@ -316,10 +324,12 @@ schema examples is auto-seeded. The minimal version:
       "rarity": "rare"
     },
     "phoenix_feather": {
+      "display_name": "Phoenix Feather",
       "max_stack_size": 16,
       "fire_resistant": true
     },
     "soul_bread": {
+      "display_name": "Soul Bread",
       "max_stack_size": 16,
       "food": {
         "nutrition": 6,
@@ -359,12 +369,13 @@ recipe.shapedAdd({
 
 ### Textures
 
-Custom item textures live in `config/livescript/textures/`. For an item with
+Custom item textures live in `data/livescript/textures/`. For an item with
 id `magic_dust`, drop a `magic_dust.png` file in there:
 
 ```
-config/livescript/
+data/livescript/
 ├── items.json
+├── scripts/
 └── textures/
     ├── magic_dust.png
     ├── phoenix_feather.png
@@ -378,8 +389,8 @@ Items without a matching PNG show the magenta/black missing-texture pattern.
 The item is still functional; it just has no icon.
 
 **Live reload:** press F3+T in-game after editing or adding a texture to see
-the change immediately. No server restart needed for texture changes (only
-for `items.json` changes).
+the change immediately. No restart needed for texture changes — only for
+`items.json` changes (and those need a full Minecraft restart, see above).
 
 ## Hot-reload semantics
 

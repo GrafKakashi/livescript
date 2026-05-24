@@ -57,6 +57,9 @@ public class CompletionProvider {
 
     public List<String> suggest(ScriptType type, String prefix) {
         if (prefix == null || prefix.isEmpty()) return List.of();
+        // No completions for non-script files (e.g. JSON config). Suggesting
+        // Lua keywords inside a JSON file would be actively misleading.
+        if (type == null) return List.of();
         List<String> all = new ArrayList<>();
         if (type == ScriptType.JS) {
             all.addAll(JS_BINDINGS);
